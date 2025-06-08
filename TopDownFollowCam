@@ -1,0 +1,32 @@
+using UnityEngine;
+
+public class TopDownCameraFollow : MonoBehaviour
+{
+    public Transform target;            // The snake head to follow
+    public float height = 10f;          // How high above the snake the camera stays
+    public float smoothSpeed = 0.125f;  // Smooth follow speed
+
+    private Vector3 offset;
+
+    void Start()
+    {
+        // Set the offset straight up by height units
+        offset = new Vector3(0, height, 0);
+    }
+
+    void LateUpdate()
+    {
+        if (target == null) return;
+
+        // Desired position is target position + offset (straight above)
+        Vector3 desiredPosition = target.position + offset;
+
+        // Smoothly move camera to the desired position
+        Vector3 smoothedPosition = Vector3.Lerp(transform.position, desiredPosition, smoothSpeed);
+        transform.position = smoothedPosition;
+
+        // Look straight down
+        transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+        
+    }
+}
