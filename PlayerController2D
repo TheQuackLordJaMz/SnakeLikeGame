@@ -1,0 +1,214 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class PlayerController2D : MonoBehaviour
+{
+    [Header("Snake Settings")]
+    [SerializeField] private float moveSpeed = 8f;
+    [SerializeField] private float turnSpeed = 90f;
+    [SerializeField] private GameObject bodyPrefab;
+    [SerializeField] private float followDistance = 0.5f;
+    [SerializeField] private float speedIncrease = 0.5f;
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip crashSound;
+    [SerializeField] private AudioClip eatSound;
+    [SerializeField] private GameObject eatParticlePrefab;
+
+    [Header("Turn Cooldown")]
+    [SerializeField] private float turnCooldown = 0.3f;
+    private float turnTimer = 0f;
+
+    private int eatCount = 0;
+    private bool isDead = false;
+
+    private List<Transform> bodyParts = new List<Transform>();
+    private List<Vector2> positions = new List<Vector2>();
+
+    private Vector2 direction = Vector2.up;
+
+    void Start()
+    {
+        Vector2 startPos = transform.position;
+        positions.Add(startPos);
+
+        for (int i = 1; i <= 10; i++)
+            positions.Add(startPos - direction * followDistance * i);
+
+        audioSource = GetComponent<AudioSource>();
+    }
+
+    void Update()
+    {
+        if (isDead) return;
+
+        if (turnTimer > 0f)
+            turnTimer -= Time.deltaTime;
+
+        // Move in the current direction
+        transform.position += (Vector3)(direction * moveSpeed * Time.deltaTime);
+
+        // Handle turning input (2D: change direction vector)
+        if (turnTimer <= 0f)
+        {
+            if (Input.GetKeyDown(KeyCode.LeftArrow))
+            {
+                direction = Quaternion.Euler(0, 0, 90) * direction;
+                turnTimer = turnCooldown;
+            }
+            else if (Input.GetKeyDown(KeyCode.RightArrow))
+            {
+                direction = Quaternion.Euler(0, 0, -90) * direction;
+                turnTimer = turnCooldown;
+            }
+        }
+
+        // Store current position if far enough from last
+        if (Vector2.Distance(positions[positions.Count - 1], transform.position) >= followDistance)
+            positions.Add(transform.position);
+
+        // Move body parts along stored trail
+        for (int i = 0; i < bodyParts.Count; i++)
+        {
+            int index = positions.Count - (i + 2);
+            if (index >= 0)
+                bodyParts[i].position = positions[index];
+        }
+
+        // Cap max speed
+        moveSpeed = Mathf.Min(moveSpeed, 20f);
+
+        // Check self-collision
+        for (int i = 2; i < bodyParts.Count; i++)
+        {
+            if (Vector2.Distance(transform.position, bodyParts[i].position) < followDistance * 0.5f)
+            {
+                Debug.Log("Game Over! Hit yourself.");
+                HandleDeath();
+            }
+        }
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        if (isDead) return;
+
+        if (other.CompareTag("Food"))
+        {
+            Grow();
+            FindAnyObjectByType<FoodSpawner>().SpawnFood();
+            StartCoroutine(ShrinkAndDestroy(other.gameObject));
+            audioSource.PlayOneShot(eatSound, 0.7f);
+
+            eatCount++;
+            if (eatCount % 5 == 0)
+                SpawnObstacle();
+
+            ScoreManager.Instance.AddPoint();
+        }
+        else if (other.CompareTag("Obstacle"))
+        {
+            Debug.Log("Game Over! Hit an obstacle.");
+            audioSource.PlayOneShot(crashSound, 1f);
+            HandleDeath();
+        }
+    }
+
+    void Grow()
+    {
+        GameObject newPart = Instantiate(bodyPrefab);
+        Vector2 spawnPos = positions.Count > 0 ? positions[positions.Count - 1] : (Vector2)transform.position;
+        newPart.transform.position = spawnPos;
+
+        Collider2D col = newPart.GetComponent<Collider2D>();
+        if (col) col.enabled = false;
+
+        newPart.tag = "Body";
+        bodyParts.Add(newPart.transform);
+
+        moveSpeed = Mathf.Min(moveSpeed + speedIncrease, 20f);
+    }
+
+    void SpawnObstacle()
+    {
+        GameManager gm = FindAnyObjectByType<GameManager>();
+        if (gm != null)
+            gm.SpawnObjs();
+    }
+
+    void HandleDeath()
+    {
+        if (isDead) return;
+
+        isDead = true;
+        ScoreManager.Instance.ResetScore();
+        StartCoroutine(DeathSequence(crashSound.length, 1f));
+    }
+
+    IEnumerator DeathSequence(float soundDelay, float animationDuration)
+    {
+        yield return new WaitForSeconds(soundDelay);
+
+        List<Transform> allParts = new List<Transform>(bodyParts);
+        allParts.Add(transform);
+
+        foreach (Transform part in allParts)
+        {
+            if (part != null)
+                StartCoroutine(AnimateDeathPart(part, animationDuration));
+        }
+
+        yield return new WaitForSeconds(animationDuration);
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    IEnumerator AnimateDeathPart(Transform part, float duration)
+    {
+        if (part == null) yield break;
+
+        float t = 0f;
+        Vector3 originalScale = part.localScale;
+
+        while (t < duration)
+        {
+            if (part == null) yield break;
+
+            float progress = t / duration;
+            part.localScale = Vector3.Lerp(originalScale, Vector3.zero, progress);
+            part.Rotate(Vector3.forward, 360 * Time.deltaTime); // Use Z axis for 2D rotation
+
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        if (part != null)
+            part.localScale = Vector3.zero;
+    }
+
+    IEnumerator ShrinkAndDestroy(GameObject obj, float duration = 0.3f)
+    {
+        if (obj == null) yield break;
+
+        if (eatParticlePrefab != null)
+            Instantiate(eatParticlePrefab, obj.transform.position, Quaternion.identity);
+
+        float t = 0f;
+        Vector3 originalScale = obj.transform.localScale;
+
+        while (t < duration)
+        {
+            if (obj == null) yield break;
+
+            float progress = t / duration;
+            obj.transform.localScale = Vector3.Lerp(originalScale, Vector3.zero, progress);
+            obj.transform.Rotate(Vector3.forward, 360 * Time.deltaTime); // Z axis for 2D
+
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        if (obj != null)
+            Destroy(obj);
+    }
+}
