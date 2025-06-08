@@ -1,0 +1,89 @@
+using UnityEngine;
+using System.Collections.Generic;
+
+public class GameManager : MonoBehaviour
+{
+    [Header("Obstacle Settings")]
+    public GameObject objPrefab;
+    public Vector3 spawnAreaSize = new Vector3(10, 0, 10); // Spawn range on X and Z
+    public float yPosition = 0.5f; // Fixed height for obstacles
+    public int obstacleCount = 5;  // How many obstacles to spawn
+    public float obstacleMoveSpeed = 1f;  // Movement speed of obstacles
+    public float spawnAreaShrinkRate = 0.05f; // How much spawn area shrinks each spawn (min 3f)
+
+    private List<GameObject> currentObstacles = new List<GameObject>();
+
+    void Start()
+    {
+        SpawnObjs();
+    }
+
+    public void SpawnObjs()
+    {
+        // Destroy all current obstacles
+      //  foreach (var obj in currentObstacles)
+       // {
+           // if (obj != null)
+               // Destroy(obj);
+      //  }
+        currentObstacles.Clear();
+
+        // Shrink spawn area but never go below minimum size 3
+        spawnAreaSize = new Vector3(
+            Mathf.Max(3f, spawnAreaSize.x - spawnAreaShrinkRate),
+            spawnAreaSize.y,
+            Mathf.Max(3f, spawnAreaSize.z - spawnAreaShrinkRate)
+        );
+
+        // Spawn obstacles at random positions within the spawn area
+        for (int i = 0; i < obstacleCount; i++)
+        {
+            Vector3 randomPosition = new Vector3(
+                Random.Range(-spawnAreaSize.x, spawnAreaSize.x),
+                yPosition,
+                Random.Range(-spawnAreaSize.z, spawnAreaSize.z)
+            );
+
+            GameObject newObstacle = Instantiate(objPrefab, randomPosition, Quaternion.identity);
+            newObstacle.tag = "Obstacle";
+
+            // Randomize size a bit for visual variety
+            float randomScale = Random.Range(0.8f, 1.5f);
+            newObstacle.transform.localScale = new Vector3(randomScale, randomScale, randomScale);
+
+            // Add movement and rotation behavior
+            MovingObstacle mover = newObstacle.AddComponent<MovingObstacle>();
+            mover.moveSpeed = obstacleMoveSpeed;
+
+            currentObstacles.Add(newObstacle);
+        }
+    }
+}
+
+// This script moves and slowly rotates obstacles for more challenge
+public class MovingObstacle : MonoBehaviour
+{
+    public float moveSpeed = 1f;
+    private Vector3 moveDirection;
+
+    void Start()
+    {
+        // Pick a random horizontal direction to move in
+        moveDirection = new Vector3(Random.Range(-1f, 1f), 0, Random.Range(-1f, 1f)).normalized;
+    }
+
+    void Update()
+    {
+        // Move the obstacle in the chosen direction
+        transform.position += moveDirection * moveSpeed * Time.deltaTime;
+
+        // Bounce back if outside the 10x10 boundary area
+        if (Mathf.Abs(transform.position.x) > 10f || Mathf.Abs(transform.position.z) > 10f)
+        {
+            moveDirection = -moveDirection;
+        }
+
+        // Rotate slowly for extra difficulty
+        transform.Rotate(0, moveSpeed * 30f * Time.deltaTime, 0);
+    }
+}
