@@ -1,0 +1,35 @@
+using UnityEngine;
+
+public class FoodSpawner : MonoBehaviour
+{
+    public GameObject foodPrefab;
+    public Vector3 spawnAreaSize = new Vector3(10, 0, 10); // X and Z define range
+    public float yPosition = 0.5f; // Height where food appears
+
+    private GameObject currentFood;
+
+    void Start()
+    {
+        SpawnFood();
+    }
+
+    public void SpawnFood()
+    {
+        if (currentFood != null) Destroy(currentFood);
+
+        spawnAreaSize = new Vector3(
+            Mathf.Max(3f, spawnAreaSize.x - 0.2f),
+            spawnAreaSize.y,
+            Mathf.Max(3f, spawnAreaSize.z - 0.2f)
+        );
+
+        Vector3 randomPosition = new Vector3(
+            Random.Range(-spawnAreaSize.x, spawnAreaSize.x),
+            yPosition,
+            Random.Range(-spawnAreaSize.z, spawnAreaSize.z)
+        );
+
+        currentFood = Instantiate(foodPrefab, randomPosition, Quaternion.identity);
+        currentFood.tag = "Food";
+    }
+}
