@@ -1,0 +1,243 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class PlayerController : MonoBehaviour
+{
+    [Header("Snake Settings")]
+    [SerializeField] private float moveSpeed = 8f;
+    [SerializeField] private float turnSpeed = 90f;
+    [SerializeField] private GameObject bodyPrefab;
+    [SerializeField] private float followDistance = 0.5f;
+    [SerializeField] private float speedIncrease = 0.5f;
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip crashSound;
+    [SerializeField] private AudioClip eatSound;
+    [SerializeField] private GameObject eatParticlePrefab;
+
+    [Header("Turn Cooldown")]
+    [SerializeField] private float turnCooldown = 0.3f;
+    private float turnTimer = 0f;
+
+    // Game state variables
+    private int eatCount = 0;
+    private bool isDead = false;
+
+    // Snake body & position tracking
+    private List<Transform> bodyParts = new List<Transform>();
+    private List<Vector3> positions = new List<Vector3>();
+
+    void Start()
+    {
+        // Initialize starting positions for body following
+        Vector3 startPos = transform.position;
+        positions.Add(startPos);
+        for (int i = 1; i <= 10; i++)
+            positions.Add(startPos - transform.forward * followDistance * i);
+
+        // Get audio source component
+        audioSource = GetComponent<AudioSource>();
+    }
+
+    void Update()
+    {
+        if (isDead) return;
+
+        // Update turn cooldown
+        if (turnTimer > 0f)
+            turnTimer -= Time.deltaTime;
+
+        // Move player forward
+        transform.position += transform.forward * moveSpeed * Time.deltaTime;
+
+        // Handle input for turning
+        if (turnTimer <= 0f)
+        {
+            if (Input.GetKeyDown(KeyCode.LeftArrow))
+            {
+                transform.Rotate(0, -90, 0);
+                turnTimer = turnCooldown;
+            }
+            else if (Input.GetKeyDown(KeyCode.RightArrow))
+            {
+                transform.Rotate(0, 90, 0);
+                turnTimer = turnCooldown;
+            }
+        }
+
+        // Record position if far enough from last
+        if (Vector3.Distance(positions[positions.Count - 1], transform.position) >= followDistance)
+            positions.Add(transform.position);
+
+        // Update body part positions to follow trail
+        for (int i = 0; i < bodyParts.Count; i++)
+        {
+            int index = positions.Count - (i + 2);
+            if (index >= 0)
+                bodyParts[i].position = positions[index];
+        }
+
+        // Clamp move speed
+        moveSpeed = Mathf.Min(moveSpeed, 20f);
+
+        // Check for collision with own body
+        for (int i = 2; i < bodyParts.Count; i++)
+        {
+            if (Vector3.Distance(transform.position, bodyParts[i].position) < followDistance * 0.5f)
+            {
+                Debug.Log("Game Over! Hit yourself.");
+                HandleDeath();
+            }
+        }
+    }
+
+    private void OnTriggerEnter(Collider other)
+    {
+        if (isDead) return;
+
+        if (other.CompareTag("Food"))
+        {
+            // Grow snake and handle food interaction
+            Grow();
+            FindAnyObjectByType<FoodSpawner>().SpawnFood();
+            StartCoroutine(ShrinkAndDestroy(other.gameObject));
+            audioSource.PlayOneShot(eatSound, 0.7f);
+
+            eatCount++;
+
+            // Spawn obstacle every 5 foods
+            if (eatCount % 5 == 0)
+                SpawnObstacle();
+
+            // Update score
+            ScoreManager.Instance.AddPoint();
+        }
+        else if (other.CompareTag("Obstacle"))
+        {
+            Debug.Log("Game Over! Hit an obstacle.");
+            audioSource.PlayOneShot(crashSound, 1f);
+            HandleDeath();
+        }
+    }
+
+    /// <summary>
+    /// Adds a new body part and increases speed slightly
+    /// </summary>
+    void Grow()
+    {
+        GameObject newPart = Instantiate(bodyPrefab);
+        Vector3 spawnPos = positions.Count > 0 ? positions[positions.Count - 1] : transform.position;
+        newPart.transform.position = spawnPos;
+
+        Collider col = newPart.GetComponent<Collider>();
+        if (col) col.enabled = false; // Prevent self-collision
+
+        newPart.tag = "Body";
+        bodyParts.Add(newPart.transform);
+
+        moveSpeed = Mathf.Min(moveSpeed + speedIncrease, 20f);
+    }
+
+    /// <summary>
+    /// Tells GameManager to spawn a new obstacle
+    /// </summary>
+    void SpawnObstacle()
+    {
+        GameManager gm = FindAnyObjectByType<GameManager>();
+        if (gm != null)
+            gm.SpawnObjs();
+    }
+
+    /// <summary>
+    /// Handles game over state and triggers death animation
+    /// </summary>
+    void HandleDeath()
+    {
+        if (isDead) return;
+
+        isDead = true;
+        ScoreManager.Instance.ResetScore();
+        StartCoroutine(DeathSequence(crashSound.length, 1f)); // Animate after crash sound
+    }
+
+    /// <summary>
+    /// Orchestrates shrinking & spinning death animation, then reloads scene
+    /// </summary>
+    IEnumerator DeathSequence(float soundDelay, float animationDuration)
+    {
+        yield return new WaitForSeconds(soundDelay);
+
+        // Include player and all body parts
+        List<Transform> allParts = new List<Transform>(bodyParts);
+        allParts.Add(transform);
+
+        // Animate each part
+        foreach (Transform part in allParts)
+        {
+            if (part != null)
+                StartCoroutine(AnimateDeathPart(part, animationDuration));
+        }
+
+        yield return new WaitForSeconds(animationDuration);
+
+        // Restart scene
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    /// <summary>
+    /// Shrinks and spins a snake part before disappearing
+    /// </summary>
+    IEnumerator AnimateDeathPart(Transform part, float duration)
+    {
+        if (part == null) yield break;
+
+        float t = 0f;
+        Vector3 originalScale = part.localScale;
+
+        while (t < duration)
+        {
+            if (part == null) yield break;
+
+            float progress = t / duration;
+            part.localScale = Vector3.Lerp(originalScale, Vector3.zero, progress);
+            part.Rotate(Vector3.up, 360 * Time.deltaTime);
+
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        if (part != null)
+            part.localScale = Vector3.zero;
+    }
+
+    /// <summary>
+    /// Plays shrink/spin effect on food and destroys it
+    /// </summary>
+    IEnumerator ShrinkAndDestroy(GameObject obj, float duration = 0.3f)
+    {
+        if (obj == null) yield break;
+
+        // Spawn particle at food location
+        if (eatParticlePrefab != null)
+            Instantiate(eatParticlePrefab, obj.transform.position, Quaternion.identity);
+
+        float t = 0f;
+        Vector3 originalScale = obj.transform.localScale;
+
+        while (t < duration)
+        {
+            if (obj == null) yield break;
+
+            float progress = t / duration;
+            obj.transform.localScale = Vector3.Lerp(originalScale, Vector3.zero, progress);
+            obj.transform.Rotate(Vector3.up, 360 * Time.deltaTime);
+
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        if (obj != null)
+            Destroy(obj);
+    }
+}
